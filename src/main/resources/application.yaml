@@ -1,0 +1,179 @@
+server:
+  port: 8080
+  servlet:
+    context-path: /api
+
+spring:
+  application:
+    name: sme-backend
+
+  # ========================
+  # DATABASE (PostgreSQL)
+  # ========================
+  datasource:
+    url: jdbc:postgresql://pg-db-nhoklam2712005.a.aivencloud.com:13297/defaultdb?sslmode=require
+    username: avnadmin
+    password: AVNS_dd2oS19gHemjzZytn6-
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 5
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+      pool-name: SME-HikariPool
+
+  # ========================
+  # JPA / HIBERNATE
+  # ========================
+  jpa:
+    hibernate:
+      ddl-auto: validate         # Flyway quản lý schema, Hibernate chỉ validate
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: true
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        jdbc:
+          time_zone: Asia/Ho_Chi_Minh
+          batch_size: 50
+        order_inserts: true
+        order_updates: true
+        envers:
+          audit_table_suffix: _audit
+          store_data_at_delete: true
+
+  # ========================
+  # FLYWAY (Database Migration)
+  # ========================
+  flyway:
+    enabled: false
+    baseline-on-migrate: true
+    locations: classpath:db/migration
+    schemas: public
+
+  # ========================
+  # REDIS
+  # ========================
+  data:
+    redis:
+      host: valkey-ece6f90-nhoklam2712005.j.aivencloud.com
+      port: 13298
+      password: AVNS_H024Xe5an2H5zHfSjFf
+      ssl:
+        enabled: true
+      timeout: 2000ms
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 8
+          min-idle: 2
+
+  # ========================
+  # SPRING BATCH
+  # ========================
+  batch:
+    job:
+      enabled: false             # Tắt auto-run khi khởi động
+    jdbc:
+      initialize-schema: always  # Tạo schema batch tự động
+
+  # ========================
+  # SPRING AI - Dùng Gemini qua chuẩn OpenAI (Không cần thẻ Visa GCP)
+  # ========================
+  ai:
+    openai:
+      api-key: AIzaSyDVK9VpAKJdNKePnCMo3ostJbHbmWinqZ8
+      base-url: https://generativelanguage.googleapis.com/v1beta/openai/
+      chat:
+        options:
+          model: gemini-1.5-flash
+          temperature: 0.7
+      embedding:
+        options:
+          model: text-embedding-004
+    vectorstore:
+      pgvector:
+        index-type: HNSW
+        distance-type: COSINE_DISTANCE
+        dimensions: 768           # Gemini embedding dimensions
+        initialize-schema: false  # Flyway quản lý
+
+  # ========================
+  # WEBSOCKET (STOMP)
+  # ========================
+  websocket:
+    message-broker:
+      application-destination-prefix: /app
+      simple-broker-destination-prefix: /topic,/queue
+
+  # ========================
+  # FILE UPLOAD
+  # ========================
+  servlet:
+    multipart:
+      enabled: true
+      max-file-size: 50MB
+      max-request-size: 50MB
+
+# ========================
+# APPLICATION CUSTOM CONFIG
+# ========================
+app:
+  # JWT Settings
+  jwt:
+    secret: ${JWT_SECRET:5367566B59703373367639792F423F4528482B4D6251655468576D5A71347437}
+    expiration-ms: 86400000      # 24 giờ
+    refresh-expiration-ms: 604800000  # 7 ngày
+
+  # CORS
+  cors:
+    allowed-origins: "http://localhost:3000,http://localhost:5173"
+    allowed-methods: "GET,POST,PUT,PATCH,DELETE,OPTIONS"
+    allowed-headers: "*"
+    allow-credentials: true
+
+  # Business Logic
+  business:
+    low-stock-threshold: 10       # Cảnh báo tồn kho thấp
+    dead-stock-days: 90           # Số ngày không bán = Hàng tồn chậm
+    loyalty-points-per-vnd: 1000  # Cứ 1000đ = 1 điểm
+    silver-threshold: 500         # 500 điểm = Silver
+    gold-threshold: 2000          # 2000 điểm = Gold
+
+  # File Storage (Local / S3)
+  storage:
+    type: local                   # local | s3
+    local-path: ./uploads
+    base-url: http://localhost:8080/api/files
+
+  # AI RAG
+  ai:
+    chunk-size: 800
+    chunk-overlap: 100
+    top-k-results: 5
+
+# ========================
+# LOGGING
+# ========================
+logging:
+  level:
+    root: INFO
+    sme.backend: DEBUG
+    org.springframework.security: INFO
+    org.hibernate.SQL: INFO
+    org.springframework.ai: INFO
+  pattern:
+    console: "%clr(%d{HH:mm:ss.SSS}){faint} %clr(${LOG_LEVEL_PATTERN:-%5p}) %clr([%15.15t]){faint} %clr(%-40.40logger{39}){cyan} %clr(:){faint} %m%n"
+
+# ========================
+# MANAGEMENT (Actuator)
+# ========================
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: when-authorized

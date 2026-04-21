@@ -15,10 +15,11 @@ import sme.backend.dto.request.AdjustInventoryRequest;
 import sme.backend.dto.response.ApiResponse;
 import sme.backend.dto.response.LowStockItem;
 import sme.backend.dto.response.PageResponse;
+import sme.backend.dto.response.InventoryResponse;
+import sme.backend.dto.response.InventoryTransactionResponse;
 import sme.backend.entity.Inventory;
 import sme.backend.entity.User;
 import sme.backend.repository.InventoryRepository;
-import sme.backend.repository.InventoryTransactionRepository;
 import sme.backend.security.UserPrincipal;
 import sme.backend.service.InventoryService;
 
@@ -33,22 +34,43 @@ public class InventoryController {
 
     private final InventoryService inventoryService;
     private final InventoryRepository inventoryRepository;
-    private final InventoryTransactionRepository txnRepository;
 
-    @GetMapping("/warehouse/{warehouseId}")
+    @GetMapping("/warehouse/{warehouseId}/search")
     @PreAuthorize("hasAnyRole('MANAGER','ADMIN', 'CASHIER')")
-    public ResponseEntity<ApiResponse<List<Inventory>>> getByWarehouse(
+    public ResponseEntity<ApiResponse<PageResponse<InventoryResponse>>> searchInventory(
             @PathVariable UUID warehouseId,
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) UUID categoryId,
+            @RequestParam(required = false) String status,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
             @AuthenticationPrincipal UserPrincipal principal) {
-        UUID wid = (principal.getRole() == User.UserRole.ROLE_ADMIN) ? warehouseId : principal.getWarehouseId();
-        return ResponseEntity.ok(ApiResponse.ok(inventoryRepository.findByWarehouseId(wid)));
+        
+        UUID wid = (principal.getRole() == User.UserRole.ROLE_ADMIN) && warehouseId != null ? warehouseId : principal.getWarehouseId();
+        Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "p.createdAt"));
+        
+        return ResponseEntity.ok(ApiResponse.ok(PageResponse.of(
+                inventoryService.searchInventory(wid, keyword, categoryId, status, pageable))));
     }
 
     @GetMapping("/{productId}/warehouse/{warehouseId}")
-    public ResponseEntity<ApiResponse<Inventory>> getOne(
+    public ResponseEntity<ApiResponse<InventoryResponse>> getOne(
             @PathVariable UUID productId,
             @PathVariable UUID warehouseId) {
-        return ResponseEntity.ok(ApiResponse.ok(inventoryService.getInventory(productId, warehouseId)));
+        return ResponseEntity.ok(ApiResponse.ok(inventoryService.getInventoryByProduct(warehouseId, productId)));
+    }
+
+    @GetMapping("/{inventoryId}/transactions")
+    @PreAuthorize("hasAnyRole('MANAGER','ADMIN')")
+    public ResponseEntity<ApiResponse<PageResponse<InventoryTransactionResponse>>> getTransactions(
+            @PathVariable UUID inventoryId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size) {
+            
+        Pageable pageable = PageRequest.of(page, size);
+        Page<InventoryTransactionResponse> txns = inventoryService.getTransactionsWithReferenceCode(inventoryId, pageable);
+        
+        return ResponseEntity.ok(ApiResponse.ok(PageResponse.of(txns)));
     }
 
     @GetMapping("/low-stock")
@@ -57,24 +79,7 @@ public class InventoryController {
             @AuthenticationPrincipal UserPrincipal principal,
             @RequestParam(required = false) UUID warehouseId) {
         UUID wid = (principal.getRole() == User.UserRole.ROLE_ADMIN) && warehouseId != null ? warehouseId : principal.getWarehouseId();
-        List<LowStockItem> result = inventoryRepository.findLowStockWithNameByWarehouse(wid);
-        return ResponseEntity.ok(ApiResponse.ok(result));
-    }
-
-    // -------------------------------------------------------------
-    // ĐÃ SỬA: Bổ sung phân trang cho API lấy lịch sử giao dịch (Thẻ kho)
-    // -------------------------------------------------------------
-    @GetMapping("/{inventoryId}/transactions")
-    @PreAuthorize("hasAnyRole('MANAGER','ADMIN')")
-    public ResponseEntity<ApiResponse<PageResponse<?>>> getTransactions(
-            @PathVariable UUID inventoryId,
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "10") int size) {
-            
-        Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
-        Page<?> txns = txnRepository.findByInventoryIdOrderByCreatedAtDesc(inventoryId, pageable);
-        
-        return ResponseEntity.ok(ApiResponse.ok(PageResponse.of((Page) txns)));
+        return ResponseEntity.ok(ApiResponse.ok(inventoryRepository.findLowStockWithNameByWarehouse(wid)));
     }
 
     @PostMapping("/adjust")
@@ -82,15 +87,13 @@ public class InventoryController {
     public ResponseEntity<ApiResponse<String>> adjustInventory(
             @Valid @RequestBody AdjustInventoryRequest req,
             @AuthenticationPrincipal UserPrincipal principal) {
-        try {
-            inventoryService.adjustInventory(req, UUID.randomUUID(), principal.getUsername());
-            return ResponseEntity.ok(ApiResponse.ok("Điều chỉnh tồn kho thành công", null));
-        } catch (Exception e) {
-            log.error("LỖI NGHIÊM TRỌNG KHI KIỂM KÊ: ", e);
-            throw new sme.backend.exception.BusinessException("ADJUST_ERROR", "Lỗi Backend: " + e.getMessage());
-        }
+        inventoryService.adjustInventory(req, UUID.randomUUID(), principal.getUsername());
+        return ResponseEntity.ok(ApiResponse.ok("Điều chỉnh tồn kho thành công", null));
     }
 
+    // ====================================================================================
+    // KHÔI PHỤC LẠI NGUYÊN BẢN: Nhận inventoryId
+    // ====================================================================================
     @PutMapping("/{inventoryId}/min-quantity")
     @PreAuthorize("hasAnyRole('MANAGER','ADMIN')")
     public ResponseEntity<ApiResponse<String>> updateMinQuantity(

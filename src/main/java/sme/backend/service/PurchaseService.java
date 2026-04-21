@@ -34,18 +34,12 @@ public class PurchaseService {
                 .orElseThrow(() -> new ResourceNotFoundException("Supplier", req.getSupplierId()));
 
         PurchaseOrder po = PurchaseOrder.builder()
-                .code(generatePOCode())
-                .supplierId(req.getSupplierId())
-                .warehouseId(req.getWarehouseId())
-                .createdByUserId(createdBy)
-                .note(req.getNote())
-                .status(PurchaseOrder.PurchaseStatus.PENDING)
+                .code(generatePOCode()).supplierId(req.getSupplierId()).warehouseId(req.getWarehouseId())
+                .createdByUserId(createdBy).note(req.getNote()).status(PurchaseOrder.PurchaseStatus.PENDING)
                 .build();
 
         for (CreatePurchaseOrderRequest.PurchaseItemRequest itemReq : req.getItems()) {
-            Product product = productRepository.findById(itemReq.getProductId())
-                    .orElseThrow(() -> new ResourceNotFoundException("Product", itemReq.getProductId()));
-
+            Product product = productRepository.findById(itemReq.getProductId()).orElseThrow(() -> new ResourceNotFoundException("Product", itemReq.getProductId()));
             PurchaseItem item = PurchaseItem.builder()
                     .productId(product.getId())
                     .quantity(itemReq.getQuantity() != null ? itemReq.getQuantity() : 0)
@@ -54,21 +48,15 @@ public class PurchaseService {
             po.addItem(item);
         }
         po.recalculateTotal();
-
-        po = purchaseOrderRepository.save(po);
-        log.info("Đã tạo phiếu nhập kho: {}", po.getCode());
-        return po;
+        return purchaseOrderRepository.save(po);
     }
 
     @Transactional
     public PurchaseOrder approvePurchaseOrder(UUID poId, UUID approvedBy) {
-        PurchaseOrder po = purchaseOrderRepository.findByIdWithItems(poId)
-                .orElseThrow(() -> new ResourceNotFoundException("PurchaseOrder", poId));
-
+        PurchaseOrder po = purchaseOrderRepository.findByIdWithItems(poId).orElseThrow(() -> new ResourceNotFoundException("PurchaseOrder", poId));
         if (po.getStatus() != PurchaseOrder.PurchaseStatus.PENDING) {
             throw new BusinessException("INVALID_STATUS", "Chỉ có thể duyệt phiếu ở trạng thái PENDING.");
         }
-
         try {
             po.setStatus(PurchaseOrder.PurchaseStatus.COMPLETED);
             po.setApprovedBy(approvedBy);
@@ -77,72 +65,42 @@ public class PurchaseService {
 
             String operator = approvedBy != null ? approvedBy.toString() : "SYSTEM";
 
-            // 1. Nhập kho từng mặt hàng an toàn
             if (po.getItems() != null) {
                 for (PurchaseItem item : po.getItems()) {
                     BigDecimal importPrice = item.getImportPrice() != null ? item.getImportPrice() : BigDecimal.ZERO;
                     int quantity = item.getQuantity() != null ? item.getQuantity() : 0;
-                    
-                    inventoryService.importStock(
-                            item.getProductId(),
-                            po.getWarehouseId(),
-                            quantity,
-                            importPrice,
-                            po.getId(), 
-                            operator
-                    );
+                    inventoryService.importStock(item.getProductId(), po.getWarehouseId(), quantity, importPrice, po.getId(), operator);
                 }
-            } else {
-                throw new BusinessException("EMPTY_ITEMS", "Phiếu nhập kho không có sản phẩm nào.");
             }
 
-            // 2. Tạo công nợ NCC an toàn
             Supplier supplier = supplierRepository.findById(po.getSupplierId()).orElse(null);
-            int paymentTerms = 30;
-            if (supplier != null && supplier.getPaymentTerms() != null) {
-                paymentTerms = supplier.getPaymentTerms();
-            }
-            
+            int paymentTerms = (supplier != null && supplier.getPaymentTerms() != null) ? supplier.getPaymentTerms() : 30;
             BigDecimal totalDebt = po.getTotalAmount() != null ? po.getTotalAmount() : BigDecimal.ZERO;
 
             SupplierDebt debt = SupplierDebt.builder()
-                    .supplierId(po.getSupplierId())
-                    .purchaseOrderId(po.getId())
-                    .totalDebt(totalDebt)
-                    .paidAmount(BigDecimal.ZERO)
+                    .supplierId(po.getSupplierId()).purchaseOrderId(po.getId())
+                    .totalDebt(totalDebt).paidAmount(BigDecimal.ZERO)
                     .status(SupplierDebt.DebtStatus.UNPAID)
-                    .dueDate(LocalDate.now().plusDays(paymentTerms))
-                    .build();
+                    .dueDate(LocalDate.now().plusDays(paymentTerms)).build();
             supplierDebtRepository.save(debt);
-
             return po;
-            
-        } catch (BusinessException be) {
-            throw be; // Ném thẳng lỗi Business (nếu do nghiệp vụ)
-        } catch (Exception e) {
-            log.error("Lỗi hệ thống cực kỳ nghiêm trọng khi duyệt phiếu: ", e);
-            // Gói mọi lỗi hệ thống (NullPointer, DB Constraint...) thành BusinessException để hiện lên UI
-            throw new BusinessException("APPROVE_CRASH", "Lỗi xử lý hệ thống: " + e.getMessage() + " (Chi tiết: " + e.getClass().getSimpleName() + ")");
-        }
+        } catch (BusinessException be) { throw be; } 
+        catch (Exception e) { throw new BusinessException("APPROVE_CRASH", "Lỗi xử lý hệ thống: " + e.getMessage()); }
     }
 
     @Transactional
     public PurchaseOrder cancelPurchaseOrder(UUID poId, String reason) {
-        PurchaseOrder po = purchaseOrderRepository.findById(poId)
-                .orElseThrow(() -> new ResourceNotFoundException("PurchaseOrder", poId));
-
-        if (po.getStatus() == PurchaseOrder.PurchaseStatus.COMPLETED) {
-            throw new BusinessException("CANNOT_CANCEL", "Không thể hủy phiếu nhập kho đã hoàn thành");
-        }
+        PurchaseOrder po = purchaseOrderRepository.findById(poId).orElseThrow(() -> new ResourceNotFoundException("PurchaseOrder", poId));
+        if (po.getStatus() == PurchaseOrder.PurchaseStatus.COMPLETED) { throw new BusinessException("CANNOT_CANCEL", "Không thể hủy phiếu đã hoàn thành"); }
         po.setStatus(PurchaseOrder.PurchaseStatus.CANCELLED);
         po.setNote((po.getNote() != null ? po.getNote() + " | " : "") + "Lý do hủy: " + reason);
         return purchaseOrderRepository.save(po);
     }
 
+    // ĐÃ SỬA: Cập nhật hàm để Search & Filter
     @Transactional(readOnly = true)
-    public Page<PurchaseOrder> getByWarehouse(UUID warehouseId, Pageable pageable) {
-        if (warehouseId == null) return purchaseOrderRepository.findAll(pageable);
-        return purchaseOrderRepository.findByWarehouseIdOrderByCreatedAtDesc(warehouseId, pageable);
+    public Page<PurchaseOrder> searchOrders(UUID warehouseId, String keyword, PurchaseOrder.PurchaseStatus status, Pageable pageable) {
+        return purchaseOrderRepository.searchPurchaseOrders(warehouseId, status, keyword, pageable);
     }
 
     @Transactional(readOnly = true)
@@ -152,11 +110,8 @@ public class PurchaseService {
 
     @Transactional(readOnly = true)
     public PurchaseOrder getById(UUID id) {
-        return purchaseOrderRepository.findByIdWithItems(id)
-                .orElseThrow(() -> new ResourceNotFoundException("PurchaseOrder", id));
+        return purchaseOrderRepository.findByIdWithItems(id).orElseThrow(() -> new ResourceNotFoundException("PurchaseOrder", id));
     }
 
-    private String generatePOCode() {
-        return "PO-" + System.currentTimeMillis();
-    }
+    private String generatePOCode() { return "PO-" + System.currentTimeMillis(); }
 }

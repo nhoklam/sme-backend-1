@@ -19,7 +19,9 @@ import sme.backend.exception.ResourceNotFoundException;
 import sme.backend.repository.CustomerRepository;
 import sme.backend.repository.InvoiceRepository;
 import sme.backend.repository.OrderRepository;
+import sme.backend.service.CustomerService; // <-- THÊM IMPORT NÀY
 
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -31,6 +33,7 @@ public class CustomerController {
     private final CustomerRepository customerRepository;
     private final InvoiceRepository invoiceRepository; 
     private final OrderRepository orderRepository;
+    private final CustomerService customerService; // <-- THÊM DÒNG NÀY
 
     /** GET /customers/lookup?phone=... — POS-03: Định danh khách (F3) */
     @GetMapping("/lookup")
@@ -44,7 +47,7 @@ public class CustomerController {
 
     /** GET /customers — Tìm kiếm CRM (ĐÃ NÂNG CẤP THÊM LỌC THEO TIER) */
     @GetMapping
-    @PreAuthorize("hasAnyRole('CASHIER','MANAGER','ADMIN')") // <--- ĐÃ THÊM CASHIER
+    @PreAuthorize("hasAnyRole('CASHIER','MANAGER','ADMIN')") 
     public ResponseEntity<ApiResponse<PageResponse<Customer>>> search(
             @RequestParam(required = false) String keyword,
             @RequestParam(required = false) String tier,
@@ -86,12 +89,9 @@ public class CustomerController {
         
         var pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
         
-        // Lấy hóa đơn POS (Mua tại quầy)
         Page<Invoice> invoices = invoiceRepository.findByCustomerIdOrderByCreatedAtDesc(id, pageable);
-        // Lấy đơn hàng Online
         Page<Order> orders = orderRepository.findByCustomerIdOrderByCreatedAtDesc(id, pageable);
 
-        // Map sang dữ liệu cơ bản để trả về Frontend nhanh gọn
         var invoiceSummary = invoices.getContent().stream().map(inv -> Map.of(
                 "id", inv.getId(),
                 "code", inv.getCode(),
@@ -146,6 +146,14 @@ public class CustomerController {
 
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.created(customerRepository.save(customer)));
+    }
+
+    // === THÊM ENDPOINT MỚI: POST /customers/bulk ===
+    @PostMapping("/bulk")
+    @PreAuthorize("hasAnyRole('MANAGER','ADMIN')")
+    public ResponseEntity<ApiResponse<Integer>> importBulk(@RequestBody List<Customer> requests) {
+        int importedCount = customerService.importBulkCustomers(requests);
+        return ResponseEntity.ok(ApiResponse.ok("Import thành công " + importedCount + " khách hàng", importedCount));
     }
 
     /** PUT /customers/{id} — Cập nhật thông tin / Khóa tài khoản */

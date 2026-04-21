@@ -30,6 +30,9 @@ public interface InternalTransferRepository extends JpaRepository<InternalTransf
         """)
     Optional<InternalTransfer> findByIdWithItems(@Param("id") UUID id);
 
+    @Query("SELECT COUNT(t) FROM InternalTransfer t WHERE t.referenceOrderId = :orderId AND t.status != 'RECEIVED' AND t.status != 'CANCELLED'")
+    long countPendingTransfersByOrderId(@Param("orderId") UUID orderId);
+
     // =========================================================================
     // CÁC HÀM TÌM KIẾM ĐÃ TỐI ƯU ĐỂ TRÁNH LỖI NULL ENUM TRÊN POSTGRESQL
     // =========================================================================
@@ -81,4 +84,6 @@ public interface InternalTransferRepository extends JpaRepository<InternalTransf
             @Param("status") InternalTransfer.TransferStatus status,
             @Param("keyword") String keyword, 
             Pageable pageable);
+
+    List<InternalTransfer> findByReferenceOrderId(UUID referenceOrderId);
 }

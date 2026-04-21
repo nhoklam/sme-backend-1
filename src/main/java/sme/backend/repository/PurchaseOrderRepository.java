@@ -16,14 +16,23 @@ import java.util.UUID;
 public interface PurchaseOrderRepository extends JpaRepository<PurchaseOrder, UUID> {
 
     Optional<PurchaseOrder> findByCode(String code);
-
     boolean existsByCode(String code);
 
-    Page<PurchaseOrder> findByWarehouseIdOrderByCreatedAtDesc(UUID warehouseId, Pageable pageable);
+    // ĐÃ THÊM: Hỗ trợ Filter, Search theo Mã PO cho màn hình Quản lý
+    @Query("""
+        SELECT po FROM PurchaseOrder po
+        WHERE (:warehouseId IS NULL OR po.warehouseId = :warehouseId)
+        AND (:status IS NULL OR po.status = :status)
+        AND (:keyword IS NULL OR :keyword = '' OR LOWER(po.code) LIKE LOWER(CONCAT('%', :keyword, '%')))
+        ORDER BY po.createdAt DESC
+        """)
+    Page<PurchaseOrder> searchPurchaseOrders(
+            @Param("warehouseId") UUID warehouseId,
+            @Param("status") PurchaseOrder.PurchaseStatus status,
+            @Param("keyword") String keyword,
+            Pageable pageable);
 
     Page<PurchaseOrder> findBySupplierIdOrderByCreatedAtDesc(UUID supplierId, Pageable pageable);
-
-    List<PurchaseOrder> findByStatus(PurchaseOrder.PurchaseStatus status);
 
     @Query("""
         SELECT po FROM PurchaseOrder po

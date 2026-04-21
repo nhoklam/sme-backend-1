@@ -26,6 +26,14 @@ public class ReportController {
     private final InventoryRepository inventoryRepository;
     private final ProductRepository productRepository;
 
+    // Hàm tiện ích để đảm bảo Manager luôn chỉ truy cập được kho của họ
+    private UUID getEffectiveWarehouseId(UserPrincipal principal, UUID requestedWarehouseId) {
+        if (principal.getRole() == User.UserRole.ROLE_ADMIN) {
+            return requestedWarehouseId;
+        }
+        return principal.getWarehouseId();
+    }
+
     @GetMapping("/revenue")
     @PreAuthorize("hasAnyRole('MANAGER','ADMIN')")
     public ResponseEntity<ApiResponse<List<Map<String, Object>>>> getRevenueReport(
@@ -33,10 +41,9 @@ public class ReportController {
             @RequestParam Instant from,
             @RequestParam Instant to,
             @RequestParam(defaultValue = "day") String period,
-            @RequestParam(required = false) UUID warehouseId) { // ĐÃ THÊM THAM SỐ NÀY
+            @RequestParam(required = false) UUID warehouseId) { 
 
-        UUID wid = (principal.getRole() == User.UserRole.ROLE_ADMIN || principal.getRole() == User.UserRole.ROLE_MANAGER)
-                && warehouseId != null ? warehouseId : principal.getWarehouseId();
+        UUID wid = getEffectiveWarehouseId(principal, warehouseId);
 
         List<Map<String, Object>> result;
         if ("year".equalsIgnoreCase(period)) {
@@ -58,8 +65,7 @@ public class ReportController {
             @AuthenticationPrincipal UserPrincipal principal,
             @RequestParam(required = false) UUID warehouseId) {
 
-        UUID wid = (principal.getRole() == User.UserRole.ROLE_ADMIN || principal.getRole() == User.UserRole.ROLE_MANAGER)
-                && warehouseId != null ? warehouseId : principal.getWarehouseId();
+        UUID wid = getEffectiveWarehouseId(principal, warehouseId);
                 
         return ResponseEntity.ok(ApiResponse.ok(
                 inventoryRepository.getInventoryValueReport(wid)));
@@ -70,41 +76,36 @@ public class ReportController {
     public ResponseEntity<ApiResponse<List<Map<String, Object>>>> getDeadStock(
             @AuthenticationPrincipal UserPrincipal principal,
             @RequestParam(defaultValue = "90") int days,
-            @RequestParam(required = false) UUID warehouseId) { // ĐÃ THÊM THAM SỐ NÀY
+            @RequestParam(required = false) UUID warehouseId) { 
 
-        UUID wid = (principal.getRole() == User.UserRole.ROLE_ADMIN || principal.getRole() == User.UserRole.ROLE_MANAGER)
-                && warehouseId != null ? warehouseId : principal.getWarehouseId();
+        UUID wid = getEffectiveWarehouseId(principal, warehouseId);
                 
         return ResponseEntity.ok(ApiResponse.ok(
                 inventoryRepository.findDeadStockByWarehouse(wid, days)));
     }
 
-        @GetMapping("/top-products")
-        @PreAuthorize("hasAnyRole('MANAGER','ADMIN')")
-        public ResponseEntity<ApiResponse<List<Map<String, Object>>>> getTopProducts(
-                @AuthenticationPrincipal UserPrincipal principal,
-                @RequestParam(required = false) UUID warehouseId,
-                @RequestParam Instant from,
-                @RequestParam Instant to,
-                @RequestParam(defaultValue = "10") int limit) {
+    @GetMapping("/top-products")
+    @PreAuthorize("hasAnyRole('MANAGER','ADMIN')")
+    public ResponseEntity<ApiResponse<List<Map<String, Object>>>> getTopProducts(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @RequestParam(required = false) UUID warehouseId,
+            @RequestParam Instant from,
+            @RequestParam Instant to,
+            @RequestParam(defaultValue = "10") int limit) {
 
-                // Tự động lấy kho của Manager từ Token
-                UUID wid = (principal.getRole() == User.UserRole.ROLE_ADMIN) && warehouseId != null 
-                        ? warehouseId : principal.getWarehouseId();
+        UUID wid = getEffectiveWarehouseId(principal, warehouseId);
 
-                // Truyền wid xuống Repository
-                return ResponseEntity.ok(ApiResponse.ok(
-                        productRepository.findTopSellingProducts(wid, from, to, limit)));
-        }
+        return ResponseEntity.ok(ApiResponse.ok(
+                productRepository.findTopSellingProducts(wid, from, to, limit)));
+    }
 
     @GetMapping("/summary")
     @PreAuthorize("hasAnyRole('MANAGER','ADMIN')")
     public ResponseEntity<ApiResponse<Map<String, Object>>> getDashboardSummary(
             @AuthenticationPrincipal UserPrincipal principal,
-            @RequestParam(required = false) UUID warehouseId) { // ĐÃ THÊM THAM SỐ NÀY
+            @RequestParam(required = false) UUID warehouseId) { 
         
-        UUID wid = (principal.getRole() == User.UserRole.ROLE_ADMIN || principal.getRole() == User.UserRole.ROLE_MANAGER)
-                && warehouseId != null ? warehouseId : principal.getWarehouseId();
+        UUID wid = getEffectiveWarehouseId(principal, warehouseId);
                 
         Instant todayStart = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.DAYS);
         Instant todayEnd   = todayStart.plus(1, java.time.temporal.ChronoUnit.DAYS);

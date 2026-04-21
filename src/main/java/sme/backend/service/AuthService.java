@@ -161,8 +161,10 @@ public class AuthService {
         if (req.getEmail() != null) user.setEmail(req.getEmail());
         if (req.getPhone() != null) user.setPhone(req.getPhone());
         if (req.getRole() != null) user.setRole(User.UserRole.valueOf(req.getRole()));
+        if (req.getWarehouseId() != null) user.setWarehouseId(req.getWarehouseId());
         
-        user.setWarehouseId(req.getWarehouseId());
+        // ĐÃ BỔ SUNG: Cập nhật cài đặt POS
+        if (req.getPosSettings() != null) user.setPosSettings(req.getPosSettings());
 
         if (req.getPassword() != null && !req.getPassword().isBlank()) {
             user.setPasswordHash(passwordEncoder.encode(req.getPassword()));
@@ -170,6 +172,9 @@ public class AuthService {
         
         return mapToResponse(userRepository.save(user));
     }
+
+    // Trong hàm mapToResponse thêm dòng này:
+    // .posSettings(user.getPosSettings())
 
     @Transactional
     public void changePassword(UUID userId, ChangePasswordRequest req) {
@@ -230,6 +235,7 @@ public class AuthService {
                 .isActive(user.getIsActive())
                 .createdAt(user.getCreatedAt())
                 .lastLoginAt(user.getLastLoginAt())
+                .posSettings(user.getPosSettings())
                 .build();
     }
 }

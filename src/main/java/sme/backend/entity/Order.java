@@ -112,7 +112,7 @@ public class Order extends BaseEntity {
     private List<OrderStatusHistory> statusHistory = new ArrayList<>();
 
     public enum OrderStatus {
-        PENDING, PACKING, SHIPPING, DELIVERED, CANCELLED, RETURNED
+        PENDING, PACKING, WAITING_FOR_CONSOLIDATION, SHIPPING, DELIVERED, CANCELLED, RETURNED
     }
 
     public enum OrderType {
@@ -149,13 +149,15 @@ public class Order extends BaseEntity {
 
     private void validateTransition(OrderStatus from, OrderStatus to) {
         boolean valid = switch (from) {
-            case PENDING   -> to == OrderStatus.PACKING || to == OrderStatus.CANCELLED;
-            case PACKING   -> to == OrderStatus.SHIPPING || to == OrderStatus.CANCELLED;
-            case SHIPPING  -> to == OrderStatus.DELIVERED || to == OrderStatus.RETURNED;
+            // ĐÃ THÊM: Cho phép chuyển từ Chờ gom hàng sang PENDING hoặc Hủy
+            case WAITING_FOR_CONSOLIDATION -> to == OrderStatus.PENDING || to == OrderStatus.CANCELLED;
+            
+            case PENDING -> to == OrderStatus.PACKING || to == OrderStatus.CANCELLED;
+            case PACKING -> to == OrderStatus.SHIPPING || to == OrderStatus.CANCELLED;
+            case SHIPPING -> to == OrderStatus.DELIVERED || to == OrderStatus.RETURNED;
             case DELIVERED -> to == OrderStatus.RETURNED;
-            default        -> false;
+            default -> false;
         };
-        
         if (!valid) {
             throw new IllegalStateException(
                     String.format("Không thể chuyển trạng thái từ %s sang %s", from, to)

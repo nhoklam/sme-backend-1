@@ -32,8 +32,7 @@ public class PurchaseController {
             @Valid @RequestBody CreatePurchaseOrderRequest req,
             @AuthenticationPrincipal UserPrincipal principal) {
         return ResponseEntity.status(HttpStatus.CREATED)
-                .body(ApiResponse.created(
-                        purchaseService.createPurchaseOrder(req, principal.getId())));
+                .body(ApiResponse.created(purchaseService.createPurchaseOrder(req, principal.getId())));
     }
 
     @PostMapping("/{id}/approve")
@@ -41,8 +40,7 @@ public class PurchaseController {
     public ResponseEntity<ApiResponse<PurchaseOrder>> approve(
             @PathVariable UUID id,
             @AuthenticationPrincipal UserPrincipal principal) {
-        return ResponseEntity.ok(ApiResponse.ok("Duyệt phiếu nhập kho thành công",
-                purchaseService.approvePurchaseOrder(id, principal.getId())));
+        return ResponseEntity.ok(ApiResponse.ok("Duyệt phiếu nhập kho thành công", purchaseService.approvePurchaseOrder(id, principal.getId())));
     }
 
     @PostMapping("/{id}/cancel")
@@ -54,23 +52,28 @@ public class PurchaseController {
         return ResponseEntity.ok(ApiResponse.ok(purchaseService.cancelPurchaseOrder(id, reason)));
     }
 
-    // ĐÃ SỬA LỖI CHÍNH Ở ĐÂY
+    // ĐÃ SỬA: Nhận thêm param keyword và status
     @GetMapping
     @PreAuthorize("hasAnyRole('MANAGER','ADMIN')")
     public ResponseEntity<ApiResponse<PageResponse<PurchaseOrder>>> getAll(
             @AuthenticationPrincipal UserPrincipal principal,
             @RequestParam(required = false) UUID warehouseId,
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) String status,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
         
-        // 1. Xử lý logic Admin (xem tất cả hoặc xem theo bộ lọc), Manager (chỉ xem kho của mình)
-        UUID wid = (principal.getRole() == User.UserRole.ROLE_ADMIN) && warehouseId != null 
-                ? warehouseId : principal.getWarehouseId();
+        UUID wid = (principal.getRole() == User.UserRole.ROLE_ADMIN) && warehouseId != null ? warehouseId : principal.getWarehouseId();
 
-        // 2. Thêm Sort.by để đảm bảo phiếu mới nhất luôn hiện lên trên cùng cho Admin
+        PurchaseOrder.PurchaseStatus poStatus = null;
+        if (status != null && !status.isBlank() && !status.equals("ALL")) {
+            try { poStatus = PurchaseOrder.PurchaseStatus.valueOf(status.toUpperCase()); } 
+            catch (IllegalArgumentException ignored) {}
+        }
+
         return ResponseEntity.ok(ApiResponse.ok(
-                PageResponse.of(purchaseService.getByWarehouse(
-                        wid, PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"))))));
+                PageResponse.of(purchaseService.searchOrders(
+                        wid, keyword, poStatus, PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"))))));
     }
 
     @GetMapping("/supplier/{supplierId}")
@@ -79,10 +82,8 @@ public class PurchaseController {
             @PathVariable UUID supplierId,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
-        // Tương tự, sắp xếp giảm dần cho lịch sử NCC
         return ResponseEntity.ok(ApiResponse.ok(
-                PageResponse.of(purchaseService.getBySupplier(
-                        supplierId, PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"))))));
+                PageResponse.of(purchaseService.getBySupplier(supplierId, PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"))))));
     }
 
     @GetMapping("/{id}")

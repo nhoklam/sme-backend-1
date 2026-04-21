@@ -26,51 +26,39 @@ public class ProductController {
 
     private final ProductService productService;
 
-    /** GET /products — Tìm kiếm sản phẩm */
     @GetMapping
     public ResponseEntity<ApiResponse<PageResponse<ProductResponse>>> search(
             @RequestParam(required = false) String keyword,
             @RequestParam(required = false) UUID categoryId,
-            @RequestParam(required = false) Boolean isActive, // BỔ SUNG DÒNG NÀY
+            @RequestParam(required = false) UUID supplierId, // ĐÃ THÊM MỚI
+            @RequestParam(required = false) Boolean isActive, 
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
         var pageable = PageRequest.of(page, size, Sort.by("name"));
-        // CẬP NHẬT GỌI SERVICE
         return ResponseEntity.ok(ApiResponse.ok(
-                PageResponse.of(productService.search(keyword, categoryId, isActive, pageable))));
+                PageResponse.of(productService.search(keyword, categoryId, supplierId, isActive, pageable))));
     }
 
-    /** GET /products/barcode/{code} — Quét mã vạch POS (POS-02) */
     @GetMapping("/barcode/{code}")
     @PreAuthorize("hasAnyRole('CASHIER','MANAGER','ADMIN')")
-    public ResponseEntity<ApiResponse<ProductResponse>> getByBarcode(
-            @PathVariable String code,
-            @AuthenticationPrincipal UserPrincipal principal) {
-        return ResponseEntity.ok(ApiResponse.ok(
-                productService.getByBarcode(code, principal.getWarehouseId())));
+    public ResponseEntity<ApiResponse<ProductResponse>> getByBarcode(@PathVariable String code, @AuthenticationPrincipal UserPrincipal principal) {
+        return ResponseEntity.ok(ApiResponse.ok(productService.getByBarcode(code, principal.getWarehouseId())));
     }
 
-    /** GET /products/{id} */
     @GetMapping("/{id}")
     public ResponseEntity<ApiResponse<ProductResponse>> getById(@PathVariable UUID id) {
         return ResponseEntity.ok(ApiResponse.ok(productService.getById(id)));
     }
 
-    /** POST /products */
     @PostMapping
     @PreAuthorize("hasAnyRole('MANAGER','ADMIN')")
-    public ResponseEntity<ApiResponse<ProductResponse>> create(
-            @Valid @RequestBody CreateProductRequest req) {
-        return ResponseEntity.status(HttpStatus.CREATED)
-                .body(ApiResponse.created(productService.createProduct(req)));
+    public ResponseEntity<ApiResponse<ProductResponse>> create(@Valid @RequestBody CreateProductRequest req) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.created(productService.createProduct(req)));
     }
 
-    /** PUT /products/{id} */
     @PutMapping("/{id}")
     @PreAuthorize("hasAnyRole('MANAGER','ADMIN')")
-    public ResponseEntity<ApiResponse<ProductResponse>> update(
-            @PathVariable UUID id,
-            @RequestBody UpdateProductRequest req) {
+    public ResponseEntity<ApiResponse<ProductResponse>> update(@PathVariable UUID id, @RequestBody UpdateProductRequest req) {
         return ResponseEntity.ok(ApiResponse.ok(productService.updateProduct(id, req)));
     }
 }

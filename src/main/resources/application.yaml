@@ -11,9 +11,9 @@ spring:
   # DATABASE (PostgreSQL)
   # ========================
   datasource:
-    url: jdbc:postgresql://pg-db-nhoklam2712005.a.aivencloud.com:13297/defaultdb?sslmode=require
+    url: jdbc:postgresql://pg-1af9dcb0-nguyennguyen2712005-9fc5.b.aivencloud.com:12250/defaultdb?sslmode=require
     username: avnadmin
-    password: AVNS_dd2oS19gHemjzZytn6-
+    password: AVNS_t86EbqYwkwtZ_kkFQCE
     driver-class-name: org.postgresql.Driver
     hikari:
       maximum-pool-size: 20
@@ -57,9 +57,9 @@ spring:
   # ========================
   data:
     redis:
-      host: valkey-ece6f90-nhoklam2712005.j.aivencloud.com
-      port: 13298
-      password: AVNS_H024Xe5an2H5zHfSjFf
+      host: valkey-1641f89e-nguyennguyen2712005-9fc5.b.aivencloud.com
+      port: 12251
+      password: AVNS__g_VCNnWEU9GVR3f6oz
       ssl:
         enabled: true
       timeout: 2000ms
@@ -89,7 +89,7 @@ spring:
   # ========================
   ai:
     openai:
-      api-key: AIzaSyBUhqqdRqNWYiipAmTh1XSpmix80o1gh1k  # (Lưu ý: Nên dùng biến môi trường ${GEMINI_API_KEY} cho bảo mật)
+      api-key: AIzaSyAVK7jmcc-wf2FInC6e2CPoXWak7eu7BRY  # (Lưu ý: Nên dùng biến môi trường ${GEMINI_API_KEY} cho bảo mật)
       base-url: https://generativelanguage.googleapis.com/v1beta/openai/
       chat:
         completions-path: /chat/completions  # BẮT BUỘC THÊM: Ghi đè path mặc định của Spring AI
@@ -109,9 +109,9 @@ spring:
         initialize-schema: false  # Flyway quản lý
 
 cloudinary:
-  cloud-name: "dyttfnqzc"
-  api-key: "275886225423731"
-  api-secret: "0WFm1HzlZiyw16_beBd3c0SnwRk"
+  cloud-name: "dubppfegu"
+  api-key: "831542688114817"
+  api-secret: "FZcuzdfvLGboS8q_kogSr1-QeU8"
   # ========================
   # WEBSOCKET (STOMP)
   # ========================

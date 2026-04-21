@@ -63,4 +63,10 @@ public class InternalTransfer extends BaseEntity {
         items.add(item);
         item.setTransfer(this);
     }
+
+    @Column(name = "reference_order_id")
+    private UUID referenceOrderId;
+
+    @Column(name = "transfer_reason")
+    private String transferReason;
 }

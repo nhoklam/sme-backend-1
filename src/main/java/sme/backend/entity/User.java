@@ -4,6 +4,7 @@ import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.envers.Audited;
 import org.hibernate.envers.AuditTable;
+import org.hibernate.envers.NotAudited;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -45,6 +46,9 @@ public class User extends BaseEntity {
 
     @Column(name = "last_login_at")
     private Instant lastLoginAt;
+    @NotAudited
+    @Column(name = "pos_settings", columnDefinition = "TEXT")
+    private String posSettings;
 
     public enum UserRole {
         ROLE_ADMIN,

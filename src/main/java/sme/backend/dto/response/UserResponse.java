@@ -19,7 +19,7 @@ public class UserResponse {
     private String warehouseName;
     private Boolean isActive;
     private Instant createdAt;
-    
+    private String posSettings;
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private Instant lastLoginAt;
 }

@@ -45,8 +45,7 @@ public class TransferController {
                 )).toList();
 
         return ResponseEntity.status(HttpStatus.CREATED).body(
-                ApiResponse.created(transferService.createTransfer(
-                        fromWid, toWid, items, note, principal.getId())));
+                ApiResponse.created(transferService.createTransfer(fromWid, toWid, items, note, principal.getId())));
     }
 
     @PutMapping("/{id}")
@@ -104,12 +103,26 @@ public class TransferController {
                 transferService.dispatch(id, principal.getId())));
     }
 
+    // ĐÃ SỬA: Nhận body List<ReceiveItemRequest>
     @PostMapping("/{id}/receive")
     @PreAuthorize("hasAnyRole('MANAGER','ADMIN')")
     public ResponseEntity<ApiResponse<InternalTransfer>> receive(
             @PathVariable UUID id,
+            @RequestBody List<TransferService.ReceiveItemRequest> receivedItems,
             @AuthenticationPrincipal UserPrincipal principal) {
         return ResponseEntity.ok(ApiResponse.ok("Nhận hàng thành công",
-                transferService.receive(id, principal.getId())));
+                transferService.receive(id, receivedItems, principal.getId())));
+    }
+
+    // ĐÃ THÊM: API Hủy phiếu chuyển kho
+    @PostMapping("/{id}/cancel")
+    @PreAuthorize("hasAnyRole('MANAGER','ADMIN')")
+    public ResponseEntity<ApiResponse<InternalTransfer>> cancel(
+            @PathVariable UUID id,
+            @RequestBody(required = false) Map<String, String> body,
+            @AuthenticationPrincipal UserPrincipal principal) {
+        String reason = (body != null && body.containsKey("reason")) ? body.get("reason") : "";
+        return ResponseEntity.ok(ApiResponse.ok("Hủy phiếu chuyển kho thành công",
+                transferService.cancelTransfer(id, principal.getId(), reason)));
     }
 }

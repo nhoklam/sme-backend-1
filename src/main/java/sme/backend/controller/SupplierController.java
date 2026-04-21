@@ -15,6 +15,7 @@ import sme.backend.exception.BusinessException;
 import sme.backend.exception.ResourceNotFoundException;
 import sme.backend.repository.SupplierRepository;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -26,7 +27,6 @@ public class SupplierController {
 
     private final SupplierRepository supplierRepository;
 
-    // ĐÃ NÂNG CẤP: Phân trang & Tìm kiếm phía Server
     @GetMapping
     @PreAuthorize("hasAnyRole('MANAGER','ADMIN')")
     public ResponseEntity<ApiResponse<PageResponse<Supplier>>> getAll(
@@ -77,12 +77,64 @@ public class SupplierController {
                 .body(ApiResponse.created(supplierRepository.save(supplier)));
     }
 
+    // ĐÃ THÊM MỚI BƯỚC 2: API IMPORT EXCEL HÀNG LOẠT
+    @PostMapping("/bulk")
+    @PreAuthorize("hasAnyRole('MANAGER','ADMIN')")
+    public ResponseEntity<ApiResponse<Map<String, String>>> importBulk(@RequestBody List<Map<String, Object>> payloadList) {
+        List<Supplier> suppliersToSave = new ArrayList<>();
+        int successCount = 0;
+        
+        for (Map<String, Object> row : payloadList) {
+            String taxCode = (String) row.get("taxCode");
+            
+            // Kiểm tra trùng lặp mã số thuế, nếu trùng thì bỏ qua dòng này
+            if (taxCode != null && !taxCode.isBlank() && supplierRepository.existsByTaxCode(taxCode)) {
+                continue; 
+            }
+
+            Supplier s = Supplier.builder()
+                    .taxCode(taxCode)
+                    .name((String) row.get("name"))
+                    .contactPerson((String) row.get("contactPerson"))
+                    .phone((String) row.get("phone"))
+                    .email((String) row.get("email"))
+                    .address((String) row.get("address"))
+                    .bankAccount((String) row.get("bankAccount"))
+                    .bankName((String) row.get("bankName"))
+                    .paymentTerms(row.get("paymentTerms") != null ? Integer.parseInt(row.get("paymentTerms").toString()) : 30)
+                    .isActive(true)
+                    .notes((String) row.get("notes"))
+                    .build();
+
+            suppliersToSave.add(s);
+            successCount++;
+        }
+
+        // Lưu toàn bộ vào database 1 lần
+        supplierRepository.saveAll(suppliersToSave);
+        return ResponseEntity.ok(ApiResponse.ok(Map.of("message", "Import thành công " + successCount + " nhà cung cấp!")));
+    }
+
     @PutMapping("/{id}")
     @PreAuthorize("hasAnyRole('MANAGER','ADMIN')")
     public ResponseEntity<ApiResponse<Supplier>> update(
             @PathVariable UUID id, @RequestBody Map<String, Object> body) {
         Supplier s = supplierRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Supplier", id));
+
+        // ĐÃ SỬA BƯỚC 1: KIỂM TRA TRÙNG LẶP MÃ SỐ THUẾ KHI SỬA
+        if (body.containsKey("taxCode")) {
+            String newTaxCode = body.get("taxCode") != null ? body.get("taxCode").toString().trim() : null;
+            
+            // Chỉ kiểm tra khi mã số thuế thay đổi so với hiện tại và không rỗng
+            if (newTaxCode != null && !newTaxCode.isBlank() && !newTaxCode.equals(s.getTaxCode())) {
+                boolean isDuplicate = supplierRepository.existsByTaxCode(newTaxCode);
+                if (isDuplicate) {
+                    throw new BusinessException("DUPLICATE_TAX_CODE", "Mã số thuế này đã tồn tại trong hệ thống!");
+                }
+            }
+            s.setTaxCode(newTaxCode);
+        }
 
         if (body.containsKey("name"))          s.setName((String) body.get("name"));
         if (body.containsKey("contactPerson")) s.setContactPerson((String) body.get("contactPerson"));

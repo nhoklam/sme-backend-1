@@ -16,10 +16,8 @@ import java.util.UUID;
 public interface OrderRepository extends JpaRepository<Order, UUID> {
 
     Optional<Order> findByCode(String code);
-
     boolean existsByCode(String code);
 
-    // Đơn hàng mới đổ vào kho (PACKING queue)
     @Query("""
         SELECT o FROM Order o
         WHERE (:wid IS NULL OR o.assignedWarehouseId = :wid)
@@ -28,7 +26,6 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
         """)
     List<Order> findPendingOrdersByWarehouse(@Param("wid") UUID warehouseId);
 
-    // Đơn BOPIS cần bàn giao tại quầy
     @Query("""
         SELECT o FROM Order o
         WHERE o.assignedWarehouseId = :wid
@@ -40,10 +37,8 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
 
     Page<Order> findByCustomerIdOrderByCreatedAtDesc(UUID customerId, Pageable pageable);
 
-    Page<Order> findByAssignedWarehouseIdAndStatusOrderByCreatedAtDesc(
-            UUID warehouseId, Order.OrderStatus status, Pageable pageable);
+    Page<Order> findByAssignedWarehouseIdAndStatusOrderByCreatedAtDesc(UUID warehouseId, Order.OrderStatus status, Pageable pageable);
 
-    // Đơn COD chưa đối soát
     @Query("""
         SELECT o FROM Order o
         WHERE o.paymentMethod = 'COD'
@@ -52,7 +47,6 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
         """)
     List<Order> findUnreconciledCODOrders();
 
-    // Đơn hàng chờ routing (chưa được gán kho)
     List<Order> findByAssignedWarehouseIdIsNullAndStatus(Order.OrderStatus status);
 
     @Query("""
@@ -62,11 +56,12 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
         """)
     Optional<Order> findByIdWithDetails(@Param("id") UUID id);
 
-// SỬA HÀM NÀY: Thêm tham số keyword và logic LIKE tìm kiếm
+    // ĐÃ SỬA BƯỚC 4: Thêm tham số `type` vào Query
     @Query("""
         SELECT o FROM Order o
         WHERE (:warehouseId IS NULL OR o.assignedWarehouseId = :warehouseId)
         AND (:status IS NULL OR o.status = :status)
+        AND (:type IS NULL OR o.type = :type)
         AND (:keyword IS NULL OR :keyword = ''
              OR LOWER(o.code) LIKE LOWER(CONCAT('%', :keyword, '%'))
              OR LOWER(o.shippingPhone) LIKE LOWER(CONCAT('%', :keyword, '%'))
@@ -76,6 +71,7 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
         """)
     Page<Order> searchOrders(@Param("warehouseId") UUID warehouseId,
                              @Param("status") Order.OrderStatus status,
+                             @Param("type") Order.OrderType type,
                              @Param("keyword") String keyword,
                              Pageable pageable);
 }

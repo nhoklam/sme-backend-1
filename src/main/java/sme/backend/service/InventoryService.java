@@ -4,10 +4,14 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import sme.backend.config.AppProperties;
 import sme.backend.dto.request.AdjustInventoryRequest;
+import sme.backend.dto.response.InventoryResponse;
+import sme.backend.dto.response.InventoryTransactionResponse;
 import sme.backend.entity.*;
 import sme.backend.exception.BusinessException;
 import sme.backend.exception.ResourceNotFoundException;
@@ -26,6 +30,10 @@ public class InventoryService {
     private final ProductRepository productRepository;
     private final NotificationService notificationService;
     private final AppProperties appProperties;
+    private final OrderRepository orderRepository;
+    private final PurchaseOrderRepository purchaseOrderRepository;
+    private final InternalTransferRepository transferRepository;
+    private final InvoiceRepository invoiceRepository;
 
     private int getSafeLowStockThreshold() {
         try {
@@ -99,7 +107,7 @@ public class InventoryService {
         checkLowStockAlert(inv);
     }
 
-@Transactional
+    @Transactional
     @CacheEvict(value = "inventories", allEntries = true)
     public void returnToStock(UUID productId, UUID warehouseId,
                               int quantity, UUID referenceId, String reason, String operator) {
@@ -107,23 +115,15 @@ public class InventoryService {
         Inventory inv = getOrCreate(productId, warehouseId);
         int before = inv.getQuantity() != null ? inv.getQuantity() : 0;
         
-        // Kiểm tra xem đây là trả về kho bán ("STOCK") hay trả từ đơn hàng Online ("RETURNED_ORDER")
         boolean isReturnToSellable = "STOCK".equals(reason) || "RETURNED_ORDER".equals(reason);
         String txnType = isReturnToSellable ? "RETURN_TO_STOCK" : "RETURN_TO_DEFECT";
 
-        // Chỉ cộng số lượng vào tồn kho bán nếu thỏa mãn điều kiện trên
         if (isReturnToSellable) {
             inv.addQuantity(quantity);
-            
-            // LƯU Ý: Nếu Entity Inventory của bạn có tách biệt giữa "Hàng thực tế" (actual) và "Hàng khả dụng" (available)
-            // thì hãy bỏ comment 2 dòng dưới đây thay cho dòng inv.addQuantity() ở trên:
-            // inv.setActualQuantity(inv.getActualQuantity() + quantity);
-            // inv.setAvailableQuantity(inv.getAvailableQuantity() + quantity);
         }
         
         inv = inventoryRepository.save(inv);
         
-        // Ghi lại lịch sử xuất nhập tồn (thẻ kho)
         recordTransaction(
                 inv, 
                 referenceId, 
@@ -170,7 +170,6 @@ public class InventoryService {
         inv.setQuantity(req.getActualQuantity());
         inv = inventoryRepository.save(inv);
         
-        // ĐÃ SỬA: Đẩy lý do (reason) vào cột note, không ghép vào operator
         recordTransaction(inv, referenceId, "ADJUSTMENT", diff, before, req.getActualQuantity(), operator, req.getReason());
         checkLowStockAlert(inv);
     }
@@ -182,7 +181,7 @@ public class InventoryService {
                 .ifPresent(inv -> {
                     inv.releaseReservedQuantity(quantity);
                     Inventory savedInv = inventoryRepository.save(inv);
-                    recordTransaction(savedInv, orderId, "RELEASE", 0, savedInv.getAvailableQuantity(), savedInv.getAvailableQuantity(), operator, null);
+                    recordTransaction(savedInv, orderId, "RELEASE", 0, savedInv.getAvailableQuantity() - quantity, savedInv.getAvailableQuantity(), operator, null);
                 });
     }
 
@@ -198,22 +197,20 @@ public class InventoryService {
         return inventoryRepository.findLowStockByWarehouse(warehouseId);
     }
 
-    // --- HÀM GHI THẺ KHO AN TOÀN ---
-    private void recordTransaction(Inventory inv, UUID referenceId, String type,
+    public void recordTransaction(Inventory inv, UUID referenceId, String type,
                                    int change, int before, int after, String operator, String note) {
                                    
-        // Tránh tràn cột created_by (max 100 ký tự)
         String safeOperator = (operator != null && operator.length() > 90) ? operator.substring(0, 90) : operator;
         if (safeOperator == null) safeOperator = "SYSTEM";
 
         InventoryTransaction txn = InventoryTransaction.builder()
                 .inventoryId(inv.getId())
-                .referenceId(referenceId != null ? referenceId : UUID.randomUUID()) // Chống lỗi NULL
+                .referenceId(referenceId != null ? referenceId : UUID.randomUUID())
                 .transactionType(type)
                 .quantityChange(change)
                 .quantityBefore(before)
                 .quantityAfter(after)
-                .note(note) // Ghi chú dài an toàn ở cột TEXT
+                .note(note)
                 .createdBy(safeOperator)
                 .build();
         txnRepository.save(txn);
@@ -224,6 +221,10 @@ public class InventoryService {
             if (inv.isLowStock()) notificationService.notifyLowStock(inv);
         } catch (Exception ignored) {}
     }
+
+    // ====================================================================================
+    // KHÔI PHỤC LẠI NGUYÊN BẢN: Cập nhật dựa trên inventoryId
+    // ====================================================================================
     @Transactional
     @CacheEvict(value = "inventories", allEntries = true)
     public void updateMinQuantity(UUID inventoryId, int newMinQuantity, String operator) {
@@ -239,5 +240,78 @@ public class InventoryService {
         inventoryRepository.save(inv);
         checkLowStockAlert(inv);
         log.info("User {} updated minQuantity for Inventory {} from {} to {}", operator, inventoryId, oldMin, newMinQuantity);
+    }
+
+    @Transactional(readOnly = true)
+    public Page<InventoryResponse> searchInventory(UUID warehouseId, String keyword, UUID categoryId, String status, Pageable pageable) {
+        return inventoryRepository.searchInventoryWithProductDetails(warehouseId, keyword, categoryId, status, pageable);
+    }
+
+    @Transactional(readOnly = true)
+    public InventoryResponse getInventoryByProduct(UUID warehouseId, UUID productId) {
+        return inventoryRepository.findByProductIdAndWarehouseId(productId, warehouseId)
+            .map(inv -> {
+                Product p = productRepository.findById(productId).orElseThrow();
+                String catName = p.getCategoryId() != null ? "Có danh mục" : ""; 
+                return new InventoryResponse(
+                    inv.getId(), p.getId(), p.getName(), p.getSku(), p.getIsbnBarcode(), p.getImageUrl(), catName,
+                    inv.getQuantity(), inv.getReservedQuantity(), inv.getInTransit(), inv.getMinQuantity(), inv.isLowStock()
+                );
+            })
+            .orElseGet(() -> {
+                Product p = productRepository.findById(productId).orElseThrow(() -> new ResourceNotFoundException("Product", productId));
+                return new InventoryResponse(
+                    null, p.getId(), p.getName(), p.getSku(), p.getIsbnBarcode(), p.getImageUrl(), "",
+                    0, 0, 0, 0, false
+                );
+            });
+    }
+
+    @Transactional(readOnly = true)
+    public Page<InventoryTransactionResponse> getTransactionsWithReferenceCode(UUID inventoryId, Pageable pageable) {
+        Page<InventoryTransaction> txns = txnRepository.findByInventoryIdOrderByCreatedAtDesc(inventoryId, pageable);
+        
+        return txns.map(txn -> {
+            InventoryTransactionResponse dto = new InventoryTransactionResponse();
+            dto.setId(txn.getId());
+            dto.setType(txn.getTransactionType());
+            dto.setQuantityChange(txn.getQuantityChange());
+            dto.setBalance(txn.getQuantityAfter());
+            dto.setNote(txn.getNote());
+            dto.setCreatedAt(txn.getCreatedAt());
+            dto.setCreatedBy(txn.getCreatedBy());
+            
+            if (txn.getReferenceId() != null) {
+                try {
+                    switch (txn.getTransactionType()) {
+                        case "SALE_POS":
+                        case "RETURN_TO_STOCK":
+                        case "RETURN_TO_DEFECT":
+                            invoiceRepository.findById(txn.getReferenceId()).ifPresent(i -> dto.setReferenceCode(i.getCode()));
+                            break;
+                        case "SALE_ONLINE":
+                        case "RESERVE":
+                        case "RELEASE":
+                            orderRepository.findById(txn.getReferenceId()).ifPresent(o -> dto.setReferenceCode(o.getCode()));
+                            break;
+                        case "IMPORT":
+                            purchaseOrderRepository.findById(txn.getReferenceId()).ifPresent(po -> dto.setReferenceCode(po.getCode()));
+                            break;
+                        case "TRANSFER_OUT":
+                        case "TRANSFER_IN":
+                            transferRepository.findById(txn.getReferenceId()).ifPresent(tr -> dto.setReferenceCode(tr.getCode()));
+                            break;
+                        default:
+                            dto.setReferenceCode("-");
+                    }
+                } catch (Exception e) {
+                    dto.setReferenceCode("Lỗi tra cứu");
+                }
+            } else {
+                dto.setReferenceCode(txn.getTransactionType().equals("ADJUSTMENT") ? "Kiểm kê" : "-");
+            }
+            if (dto.getReferenceCode() == null) dto.setReferenceCode("-");
+            return dto;
+        });
     }
 }

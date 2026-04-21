@@ -28,4 +28,6 @@ public class CreateUserRequest {
     private String role;  // ROLE_ADMIN, ROLE_MANAGER, ROLE_CASHIER
 
     private UUID warehouseId;
+
+    private String posSettings;
 }

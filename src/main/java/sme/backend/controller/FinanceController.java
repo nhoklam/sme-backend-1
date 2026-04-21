@@ -34,6 +34,23 @@ public class FinanceController {
 
     private final FinanceService financeService;
 
+    // ĐÃ THÊM YÊU CẦU 7: API lấy quỹ Toàn hệ thống
+    @GetMapping("/cashbook/balance/total")
+    @PreAuthorize("hasAnyRole('MANAGER','ADMIN')")
+    public ResponseEntity<ApiResponse<BigDecimal>> getTotalFundBalance() {
+        BigDecimal cash = financeService.getCurrentBalance(null, "CASH_111");
+        BigDecimal bank = financeService.getCurrentBalance(null, "BANK_112");
+        return ResponseEntity.ok(ApiResponse.ok(cash.add(bank)));
+    }
+
+    // Hàm tiện ích để đảm bảo Manager luôn chỉ truy cập được kho của họ
+    private UUID getEffectiveWarehouseId(UserPrincipal principal, UUID requestedWarehouseId) {
+        if (principal.getRole() == User.UserRole.ROLE_ADMIN) {
+            return requestedWarehouseId;
+        }
+        return principal.getWarehouseId();
+    }
+
     @PostMapping("/cashbook")
     @PreAuthorize("hasAnyRole('MANAGER','ADMIN')")
     public ResponseEntity<ApiResponse<CashbookTransaction>> createEntry(
@@ -54,8 +71,7 @@ public class FinanceController {
             @AuthenticationPrincipal UserPrincipal principal,
             @RequestParam(required = false) UUID warehouseId) {
             
-        UUID wid = (principal.getRole() == User.UserRole.ROLE_ADMIN) && warehouseId != null 
-                ? warehouseId : principal.getWarehouseId();
+        UUID wid = getEffectiveWarehouseId(principal, warehouseId);
 
         BigDecimal cash = financeService.getCurrentBalance(wid, "CASH_111");
         BigDecimal bank = financeService.getCurrentBalance(wid, "BANK_112");
@@ -75,8 +91,7 @@ public class FinanceController {
             @RequestParam Instant from,
             @RequestParam Instant to) {
             
-        UUID wid = (principal.getRole() == User.UserRole.ROLE_ADMIN) && warehouseId != null 
-                ? warehouseId : principal.getWarehouseId();
+        UUID wid = getEffectiveWarehouseId(principal, warehouseId);
 
         return ResponseEntity.ok(ApiResponse.ok(
                 financeService.getCashbookReport(wid, from, to)));
@@ -88,13 +103,11 @@ public class FinanceController {
             @AuthenticationPrincipal UserPrincipal principal,
             @RequestParam(required = false) UUID warehouseId) {
             
-        UUID wid = (principal.getRole() == User.UserRole.ROLE_ADMIN) && warehouseId != null 
-                ? warehouseId : principal.getWarehouseId();
+        UUID wid = getEffectiveWarehouseId(principal, warehouseId);
 
         return ResponseEntity.ok(ApiResponse.ok(financeService.getOutstandingDebts(wid)));
     }
 
-    // ĐÃ BỔ SUNG: Lấy tổng nợ của một Nhà cung cấp
     @GetMapping("/supplier-debts/supplier/{supplierId}/total")
     @PreAuthorize("hasAnyRole('MANAGER','ADMIN')")
     public ResponseEntity<ApiResponse<BigDecimal>> getTotalOutstandingBySupplier(
@@ -144,8 +157,7 @@ public class FinanceController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size) {
             
-        UUID wid = (principal.getRole() == User.UserRole.ROLE_ADMIN) && warehouseId != null 
-                ? warehouseId : principal.getWarehouseId();
+        UUID wid = getEffectiveWarehouseId(principal, warehouseId);
 
         Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
 

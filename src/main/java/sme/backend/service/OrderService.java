@@ -33,18 +33,15 @@ public class OrderService {
     private final NotificationService notificationService;
     private final CashbookTransactionRepository cashbookRepository;
     private final InternalTransferRepository transferRepository;
+    private final UserRepository userRepository; // <-- ĐÃ THÊM: Để tra cứu tên User
     
-    // ĐÃ THÊM: Dùng EntityManager để trực tiếp gọi vào Database nếu cần lấy ID User
     private final EntityManager entityManager; 
 
-    // ĐÃ SỬA: Hàm tự động dò tìm User ID của người đang đăng nhập cực kỳ an toàn
     private UUID getCurrentUserIdSafe() {
         var auth = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
         if (auth == null || !auth.isAuthenticated()) {
             throw new BusinessException("UNAUTHORIZED", "Không tìm thấy thông tin đăng nhập.");
         }
-
-        // LỚP BẢO VỆ 1: Lấy ID trực tiếp từ Class UserPrincipal thông qua Reflection
         try {
             Object principal = auth.getPrincipal();
             java.lang.reflect.Method method = principal.getClass().getMethod("getId");
@@ -54,8 +51,6 @@ public class OrderService {
         } catch (Exception e) {
             log.warn("Không lấy được ID qua Token, chuyển sang quét DB bằng username...");
         }
-
-        // LỚP BẢO VỆ 2: Query thẳng vào DB tìm UUID bằng username (Ví dụ: "admin")
         try {
             String username = auth.getName();
             if (username != null && !username.isEmpty()) {
@@ -69,13 +64,9 @@ public class OrderService {
         } catch (Exception e) {
             log.warn("Lỗi khi query bảng users: {}", e.getMessage());
         }
-
         throw new BusinessException("USER_NOT_FOUND", "Hệ thống không lấy được ID của bạn. Hãy chắc chắn bảng 'users' có dữ liệu tài khoản này.");
     }
 
-    // ─────────────────────────────────────────────────────────
-    // TẠO ĐƠN HÀNG (TÍCH HỢP TỰ ĐỘNG GOM HÀNG)
-    // ─────────────────────────────────────────────────────────
     @Transactional
     public OrderResponse createOrder(CreateOrderRequest req) {
         Customer customer = customerRepository.findById(req.getCustomerId())
@@ -84,7 +75,6 @@ public class OrderService {
         List<OrderItem> orderItems = new ArrayList<>();
         BigDecimal totalAmount = BigDecimal.ZERO;
 
-        // Bắt buộc phải có UserID hợp lệ thì Database mới cho tạo Phiếu Chuyển Kho
         UUID currentUserId = getCurrentUserIdSafe();
 
         for (CreateOrderRequest.OrderItemRequest itemReq : req.getItems()) {
@@ -149,7 +139,7 @@ public class OrderService {
                 InternalTransfer transfer = InternalTransfer.builder()
                         .code("TRF-AUTO-" + System.currentTimeMillis() + "-" + sourceWarehouseId.toString().substring(0, 4))
                         .fromWarehouseId(sourceWarehouseId).toWarehouseId(assignedWarehouseId)
-                        .createdByUserId(currentUserId) // ĐÃ FIX TẠI ĐÂY: Truyền ID thực tế
+                        .createdByUserId(currentUserId)
                         .status(InternalTransfer.TransferStatus.DRAFT)
                         .referenceOrderId(order.getId())
                         .note("Tự động tạo - Gom hàng cho Đơn #" + order.getCode())
@@ -172,24 +162,16 @@ public class OrderService {
         }
 
         notificationService.notifyNewOrder(order, assignedWarehouseId);
-        log.info("Order created: {} → status: {}", order.getCode(), order.getStatus());
         return mapToResponse(order);
     }
 
-    // ─────────────────────────────────────────────────────────
-    // THUẬT TOÁN GỢI Ý KẾ HOẠCH GOM HÀNG 
-    // ─────────────────────────────────────────────────────────
     @Transactional(readOnly = true)
     public List<Map<String, Object>> suggestBranchesForOrder(String provinceCode, List<CreateOrderRequest.OrderItemRequest> items) {
         if (items == null || items.isEmpty()) return List.of();
-
         List<Warehouse> activeWarehouses = warehouseRepository.findByIsActiveTrueOrderByName();
         List<Map<String, Object>> suggestions = new ArrayList<>();
-        
         List<UUID> productIds = items.stream().map(CreateOrderRequest.OrderItemRequest::getProductId).toList();
-        
         List<Inventory> allInventories = inventoryRepository.findByProductIdIn(productIds); 
-        
         Map<UUID, Map<UUID, Integer>> stockMatrix = new HashMap<>();
         for (Inventory inv : allInventories) {
             stockMatrix.computeIfAbsent(inv.getWarehouseId(), k -> new HashMap<>())
@@ -198,11 +180,9 @@ public class OrderService {
 
         for (Warehouse targetWarehouse : activeWarehouses) {
             boolean isSameProvince = provinceCode != null && provinceCode.equals(targetWarehouse.getProvinceCode());
-            
             List<Map<String, Object>> availableItems = new ArrayList<>();
             List<Map<String, Object>> transferRequirements = new ArrayList<>();
             boolean isReadyToShip = true;
-            
             Map<UUID, Integer> targetStock = stockMatrix.getOrDefault(targetWarehouse.getId(), Collections.emptyMap());
 
             for (CreateOrderRequest.OrderItemRequest item : items) {
@@ -217,7 +197,6 @@ public class OrderService {
                         availableItems.add(Map.of("productId", item.getProductId(), "quantity", currentStock));
                     }
                     int missingQty = requiredQty - currentStock;
-                    
                     int remainingToFind = missingQty;
                     for (Warehouse sourceWarehouse : activeWarehouses) {
                         if (sourceWarehouse.getId().equals(targetWarehouse.getId())) continue;
@@ -229,7 +208,6 @@ public class OrderService {
                         if (sourceStock > 0) {
                             int takeQty = Math.min(sourceStock, remainingToFind);
                             remainingToFind -= takeQty;
-                            
                             Product prod = productRepository.findById(item.getProductId()).orElseThrow();
                             transferRequirements.add(Map.of(
                                 "fromWarehouseId", sourceWarehouse.getId(),
@@ -247,7 +225,6 @@ public class OrderService {
                     }
                 }
             }
-
             if (!isReadyToShip && transferRequirements.isEmpty()) continue;
 
             Map<String, Object> plan = new HashMap<>();
@@ -263,18 +240,12 @@ public class OrderService {
             if (isSameProvince) score += 500;
             score -= transferRequirements.size() * 10; 
             plan.put("sortScore", score);
-            
             suggestions.add(plan);
         }
-
         suggestions.sort((a, b) -> Integer.compare((Integer) b.get("sortScore"), (Integer) a.get("sortScore")));
-
         return suggestions;
     }
 
-    // ─────────────────────────────────────────────────────────
-    // CÁC HÀM CÒN LẠI 
-    // ─────────────────────────────────────────────────────────
     @Transactional
     public OrderResponse updateStatus(UUID orderId, String newStatus, String note, String trackingCode, String shippingProvider, String changedBy) {
         Order order = orderRepository.findByIdWithDetails(orderId).orElseThrow();
@@ -293,14 +264,67 @@ public class OrderService {
             order.getItems().forEach(item -> inventoryService.confirmOnlineShipment(item.getProductId(), order.getAssignedWarehouseId(), item.getQuantity(), orderId, changedBy));
         }
 
-        if (status == Order.OrderStatus.CANCELLED && order.getAssignedWarehouseId() != null) {
-            order.getItems().forEach(item -> inventoryService.releaseReservation(item.getProductId(), order.getAssignedWarehouseId(), item.getQuantity(), orderId, changedBy));
+        if (status == Order.OrderStatus.CANCELLED) {
+            List<InternalTransfer> transfers = transferRepository.findByReferenceOrderId(orderId);
+            Map<UUID, Integer> stuckTransferQtys = new HashMap<>();
+
+            for (InternalTransfer transfer : transfers) {
+                if (transfer.getStatus() == InternalTransfer.TransferStatus.DRAFT) {
+                    transfer.setStatus(InternalTransfer.TransferStatus.CANCELLED);
+                    transfer.setNote((transfer.getNote() != null ? transfer.getNote() : "") + " | Hủy tự động do Đơn hàng " + order.getCode() + " bị khách hủy.");
+                    transferRepository.save(transfer);
+
+                    for (TransferItem tItem : transfer.getItems()) {
+                        inventoryService.releaseReservation(tItem.getProductId(), transfer.getFromWarehouseId(), tItem.getQuantity(), orderId, changedBy);
+                        stuckTransferQtys.put(tItem.getProductId(), stuckTransferQtys.getOrDefault(tItem.getProductId(), 0) + tItem.getQuantity());
+                    }
+                } 
+                else if (transfer.getStatus() == InternalTransfer.TransferStatus.DISPATCHED) {
+                    transfer.setStatus(InternalTransfer.TransferStatus.CANCELLED);
+                    transfer.setNote((transfer.getNote() != null ? transfer.getNote() : "") + " | Hủy tự động do Đơn hàng hủy. Hàng đang đi đường được hoàn trả về kho gốc.");
+                    transferRepository.save(transfer);
+
+                    for (TransferItem tItem : transfer.getItems()) {
+                        Inventory srcInv = inventoryRepository.findByProductIdAndWarehouseId(tItem.getProductId(), transfer.getFromWarehouseId()).orElse(null);
+                        if (srcInv != null) {
+                            int before = srcInv.getQuantity() != null ? srcInv.getQuantity() : 0;
+                            srcInv.setInTransit(Math.max(0, srcInv.getInTransit() - tItem.getQuantity()));
+                            srcInv.setQuantity(srcInv.getQuantity() + tItem.getQuantity());
+                            inventoryRepository.save(srcInv);
+                            inventoryService.recordTransaction(srcInv, transfer.getId(), "CANCEL_TRANSFER", tItem.getQuantity(), before, srcInv.getQuantity(), changedBy, "Khách hủy đơn, quay đầu hàng đang luân chuyển");
+                        }
+                        stuckTransferQtys.put(tItem.getProductId(), stuckTransferQtys.getOrDefault(tItem.getProductId(), 0) + tItem.getQuantity());
+                    }
+                }
+            }
+
+            if (order.getAssignedWarehouseId() != null) {
+                for (OrderItem item : order.getItems()) {
+                    int totalRequired = item.getQuantity();
+                    int stuckQty = stuckTransferQtys.getOrDefault(item.getProductId(), 0);
+                    int qtyToReleaseAtAssigned = totalRequired - stuckQty;
+                    if (qtyToReleaseAtAssigned > 0) {
+                        inventoryService.releaseReservation(item.getProductId(), order.getAssignedWarehouseId(), qtyToReleaseAtAssigned, orderId, changedBy);
+                    }
+                }
+            }
             order.setCancelledReason(note);
         }
 
-        if (status == Order.OrderStatus.DELIVERED && "COD".equals(order.getPaymentMethod())) {
-            order.setPaymentStatus(Order.PaymentStatus.PAID);
-            recordCODRevenue(order);
+        if (status == Order.OrderStatus.RETURNED && order.getAssignedWarehouseId() != null) {
+            order.getItems().forEach(item -> inventoryService.returnToStock(
+                item.getProductId(), order.getAssignedWarehouseId(), item.getQuantity(), orderId, "RETURNED_ORDER", changedBy
+            ));
+        }
+
+        if (status == Order.OrderStatus.DELIVERED) {
+            if ("COD".equals(order.getPaymentMethod())) {
+                order.setPaymentStatus(Order.PaymentStatus.PAID);
+                recordCODRevenue(order);
+            } else if ("BANK_TRANSFER".equals(order.getPaymentMethod()) && order.getPaymentStatus() == Order.PaymentStatus.UNPAID) {
+                order.setPaymentStatus(Order.PaymentStatus.PAID);
+                recordBankTransferRevenue(order, changedBy);
+            }
         }
 
         return mapToResponse(orderRepository.save(order));
@@ -309,6 +333,20 @@ public class OrderService {
     private void recordCODRevenue(Order order) {
         if (order.getAssignedWarehouseId() == null) return;
         cashbookRepository.save(CashbookTransaction.builder().warehouseId(order.getAssignedWarehouseId()).fundType(CashbookTransaction.FundType.CASH_111).transactionType(CashbookTransaction.TransactionType.IN).referenceType("SALE_ONLINE").referenceId(order.getId()).amount(order.getFinalAmount()).description("Thu COD đơn hàng #" + order.getCode()).createdBy("SYSTEM").build());
+    }
+
+    private void recordBankTransferRevenue(Order order, String changedBy) {
+        if (order.getAssignedWarehouseId() == null) return;
+        cashbookRepository.save(CashbookTransaction.builder()
+                .warehouseId(order.getAssignedWarehouseId())
+                .fundType(CashbookTransaction.FundType.BANK_112)
+                .transactionType(CashbookTransaction.TransactionType.IN)
+                .referenceType("SALE_ONLINE")
+                .referenceId(order.getId())
+                .amount(order.getFinalAmount())
+                .description("Thu chuyển khoản đơn hàng #" + order.getCode())
+                .createdBy(changedBy != null ? changedBy : "SYSTEM")
+                .build());
     }
 
     @Transactional(readOnly = true)
@@ -338,9 +376,27 @@ public class OrderService {
         if (order.getAssignedWarehouseId() != null) {
             warehouseName = warehouseRepository.findById(order.getAssignedWarehouseId()).map(Warehouse::getName).orElse(null);
         }
-        return OrderResponse.builder().id(order.getId()).code(order.getCode()).customerId(order.getCustomerId()).customerName(custName).customerPhone(custPhone).assignedWarehouseId(order.getAssignedWarehouseId()).assignedWarehouseName(warehouseName).status(order.getStatus() != null ? order.getStatus().name() : null).type(order.getType() != null ? order.getType().name() : null).shippingName(order.getShippingName()).shippingPhone(order.getShippingPhone()).shippingAddress(order.getShippingAddress()).provinceCode(order.getProvinceCode()).totalAmount(order.getTotalAmount()).shippingFee(order.getShippingFee()).discountAmount(order.getDiscountAmount()).finalAmount(order.getFinalAmount()).paymentMethod(order.getPaymentMethod()).paymentStatus(order.getPaymentStatus() != null ? order.getPaymentStatus().name() : null).trackingCode(order.getTrackingCode()).shippingProvider(order.getShippingProvider()).codReconciled(order.getCodReconciled()).note(order.getNote()).cancelledReason(order.getCancelledReason()).packedBy(order.getPackedBy()).packedAt(order.getPackedAt()).createdAt(order.getCreatedAt()).updatedAt(order.getUpdatedAt()).items(List.of()).statusHistory(List.of()).build();
+        return OrderResponse.builder()
+                .id(order.getId()).code(order.getCode()).customerId(order.getCustomerId())
+                .customerName(custName).customerPhone(custPhone)
+                .assignedWarehouseId(order.getAssignedWarehouseId()).assignedWarehouseName(warehouseName)
+                .status(order.getStatus() != null ? order.getStatus().name() : null)
+                .type(order.getType() != null ? order.getType().name() : null)
+                .shippingName(order.getShippingName()).shippingPhone(order.getShippingPhone())
+                .shippingAddress(order.getShippingAddress()).provinceCode(order.getProvinceCode())
+                .totalAmount(order.getTotalAmount()).shippingFee(order.getShippingFee())
+                .discountAmount(order.getDiscountAmount()).finalAmount(order.getFinalAmount())
+                .paymentMethod(order.getPaymentMethod())
+                .paymentStatus(order.getPaymentStatus() != null ? order.getPaymentStatus().name() : null)
+                .trackingCode(order.getTrackingCode()).shippingProvider(order.getShippingProvider())
+                .codReconciled(order.getCodReconciled()).note(order.getNote())
+                .cancelledReason(order.getCancelledReason())
+                .packedBy(order.getPackedBy()).packedAt(order.getPackedAt())
+                .createdAt(order.getCreatedAt()).updatedAt(order.getUpdatedAt())
+                .items(List.of()).statusHistory(List.of()).build();
     }
 
+    // ĐÃ SỬA TẠI ĐÂY: Thêm logic tự động dò Tên nhân viên từ UUID
     public OrderResponse mapToResponse(Order order) {
         String custName = "Khách lẻ", custPhone = null;
         if (order.getCustomerId() != null) {
@@ -351,6 +407,13 @@ public class OrderService {
         if (order.getAssignedWarehouseId() != null) {
             warehouseName = warehouseRepository.findById(order.getAssignedWarehouseId()).map(Warehouse::getName).orElse(null);
         }
+
+        // Lấy tên người đóng gói
+        String packedByName = null;
+        if (order.getPackedBy() != null) {
+            packedByName = userRepository.findById(order.getPackedBy()).map(User::getFullName).orElse(null);
+        }
+
         List<OrderResponse.ItemResponse> items = order.getItems() == null ? List.of() :
                 order.getItems().stream().map(i -> {
                     var product = productRepository.findById(i.getProductId()).orElse(null);
@@ -358,8 +421,46 @@ public class OrderService {
                 }).toList();
 
         List<OrderResponse.StatusHistoryResponse> history = order.getStatusHistory() == null ? List.of() :
-                order.getStatusHistory().stream().map(h -> OrderResponse.StatusHistoryResponse.builder().oldStatus(h.getOldStatus()).newStatus(h.getNewStatus()).note(h.getNote()).changedBy(h.getChangedBy()).createdAt(h.getCreatedAt()).build()).toList();
+                order.getStatusHistory().stream().map(h -> {
+                    // Lấy tên người thay đổi trạng thái
+                    String changedByName = "Hệ thống";
+                    if (h.getChangedBy() != null && !h.getChangedBy().equals("SYSTEM")) {
+                        try {
+                            UUID uId = UUID.fromString(h.getChangedBy());
+                            changedByName = userRepository.findById(uId).map(User::getFullName).orElse(h.getChangedBy());
+                        } catch (Exception e) {
+                            changedByName = h.getChangedBy(); // Fallback nếu không phải định dạng UUID
+                        }
+                    }
+                    return OrderResponse.StatusHistoryResponse.builder()
+                        .oldStatus(h.getOldStatus())
+                        .newStatus(h.getNewStatus())
+                        .note(h.getNote())
+                        .changedBy(h.getChangedBy())
+                        .changedByName(changedByName)
+                        .createdAt(h.getCreatedAt())
+                        .build();
+                }).toList();
 
-        return OrderResponse.builder().id(order.getId()).code(order.getCode()).customerId(order.getCustomerId()).customerName(custName).customerPhone(custPhone).assignedWarehouseId(order.getAssignedWarehouseId()).assignedWarehouseName(warehouseName).status(order.getStatus() != null ? order.getStatus().name() : null).type(order.getType() != null ? order.getType().name() : null).shippingName(order.getShippingName()).shippingPhone(order.getShippingPhone()).shippingAddress(order.getShippingAddress()).provinceCode(order.getProvinceCode()).totalAmount(order.getTotalAmount()).shippingFee(order.getShippingFee()).discountAmount(order.getDiscountAmount()).finalAmount(order.getFinalAmount()).paymentMethod(order.getPaymentMethod()).paymentStatus(order.getPaymentStatus() != null ? order.getPaymentStatus().name() : null).trackingCode(order.getTrackingCode()).shippingProvider(order.getShippingProvider()).codReconciled(order.getCodReconciled()).note(order.getNote()).cancelledReason(order.getCancelledReason()).packedBy(order.getPackedBy()).packedAt(order.getPackedAt()).createdAt(order.getCreatedAt()).updatedAt(order.getUpdatedAt()).items(items).statusHistory(history).build();
+        return OrderResponse.builder()
+                .id(order.getId()).code(order.getCode()).customerId(order.getCustomerId())
+                .customerName(custName).customerPhone(custPhone)
+                .assignedWarehouseId(order.getAssignedWarehouseId()).assignedWarehouseName(warehouseName)
+                .status(order.getStatus() != null ? order.getStatus().name() : null)
+                .type(order.getType() != null ? order.getType().name() : null)
+                .shippingName(order.getShippingName()).shippingPhone(order.getShippingPhone())
+                .shippingAddress(order.getShippingAddress()).provinceCode(order.getProvinceCode())
+                .totalAmount(order.getTotalAmount()).shippingFee(order.getShippingFee())
+                .discountAmount(order.getDiscountAmount()).finalAmount(order.getFinalAmount())
+                .paymentMethod(order.getPaymentMethod())
+                .paymentStatus(order.getPaymentStatus() != null ? order.getPaymentStatus().name() : null)
+                .trackingCode(order.getTrackingCode()).shippingProvider(order.getShippingProvider())
+                .codReconciled(order.getCodReconciled()).note(order.getNote())
+                .cancelledReason(order.getCancelledReason())
+                .packedBy(order.getPackedBy())
+                .packedByName(packedByName) // Đã gán tên
+                .packedAt(order.getPackedAt())
+                .createdAt(order.getCreatedAt()).updatedAt(order.getUpdatedAt())
+                .items(items).statusHistory(history).build();
     }
 }

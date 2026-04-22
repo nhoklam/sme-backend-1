@@ -16,6 +16,7 @@ public class OrderResponse {
     private UUID customerId;
     private String cancelledReason;
     private UUID packedBy;
+    private String packedByName; // <-- ĐÃ THÊM
     private Instant packedAt;
     private String customerName;
     private String customerPhone;
@@ -58,6 +59,7 @@ public class OrderResponse {
         private String newStatus;
         private String note;
         private String changedBy;
+        private String changedByName; // <-- ĐÃ THÊM
         private Instant createdAt;
     }
 }

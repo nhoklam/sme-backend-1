@@ -14,8 +14,11 @@ import sme.backend.dto.request.UpdateProductRequest;
 import sme.backend.dto.response.ApiResponse;
 import sme.backend.dto.response.PageResponse;
 import sme.backend.dto.response.ProductResponse;
+import sme.backend.exception.BusinessException;
 import sme.backend.security.UserPrincipal;
 import sme.backend.service.ProductService;
+import java.util.List;
+import java.util.Map;
 
 import java.util.UUID;
 
@@ -60,5 +63,33 @@ public class ProductController {
     @PreAuthorize("hasAnyRole('MANAGER','ADMIN')")
     public ResponseEntity<ApiResponse<ProductResponse>> update(@PathVariable UUID id, @RequestBody UpdateProductRequest req) {
         return ResponseEntity.ok(ApiResponse.ok(productService.updateProduct(id, req)));
+    }
+
+    @PostMapping("/{id}/images")
+    @PreAuthorize("hasAnyRole('MANAGER','ADMIN')")
+    public ResponseEntity<ApiResponse<ProductResponse>> addImage(
+            @PathVariable UUID id,
+            @RequestBody Map<String, String> body) {
+        String imageUrl = body.get("imageUrl");
+        if (imageUrl == null || imageUrl.isBlank()) {
+            throw new BusinessException("INVALID_REQUEST", "imageUrl không được để trống");
+        }
+        return ResponseEntity.ok(ApiResponse.ok(productService.addImage(id, imageUrl)));
+    }
+
+    @DeleteMapping("/{id}/images/{imageId}")
+    @PreAuthorize("hasAnyRole('MANAGER','ADMIN')")
+    public ResponseEntity<ApiResponse<ProductResponse>> deleteImage(
+            @PathVariable UUID id,
+            @PathVariable UUID imageId) {
+        return ResponseEntity.ok(ApiResponse.ok(productService.deleteImage(id, imageId)));
+    }
+
+    @PutMapping("/{id}/images/reorder")
+    @PreAuthorize("hasAnyRole('MANAGER','ADMIN')")
+    public ResponseEntity<ApiResponse<ProductResponse>> reorderImages(
+            @PathVariable UUID id,
+            @RequestBody List<UUID> orderedImageIds) {
+        return ResponseEntity.ok(ApiResponse.ok(productService.reorderImages(id, orderedImageIds)));
     }
 }

@@ -2,7 +2,7 @@ package sme.backend.dto.request;
 
 import jakarta.validation.constraints.*;
 import lombok.Data;
-
+import java.util.List;
 import java.math.BigDecimal;
 import java.util.UUID;
 
@@ -34,9 +34,11 @@ public class CreateProductRequest {
     private BigDecimal wholesalePrice;
 
     private String imageUrl;
-
+    private List<String> imageUrls;
     private String unit;
 
     @DecimalMin(value = "0")
     private BigDecimal weight;
+
+
 }

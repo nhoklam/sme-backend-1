@@ -6,7 +6,7 @@ import lombok.Data;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
-
+import java.util.List;
 @Data @Builder
 public class ProductResponse {
     private UUID id;
@@ -21,6 +21,7 @@ public class ProductResponse {
     private BigDecimal wholesalePrice;
     private BigDecimal macPrice;
     private String imageUrl;
+    private List<String> imageUrls;  
     private String unit;
     private BigDecimal weight;
     private Boolean isActive;
